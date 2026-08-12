@@ -12,7 +12,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from dmm_calibration.config import ConfigValidationError, ConfigWriteError, WorkstationConfig
+from dmm_calibration.config import (
+    ConfigValidationError,
+    ConfigWriteError,
+    Environment,
+    WorkstationConfig,
+)
+from dmm_calibration.logging import LogQueryService
+from dmm_calibration.ui.log_viewer_dialog import LogViewerDialog
 from dmm_calibration.ui.settings_dialog import SettingsDialog
 from dmm_calibration.workflow import ApplicationController
 
@@ -21,7 +28,7 @@ class MainWindow(QMainWindow):
     def __init__(self, controller: ApplicationController):
         super().__init__()
         self.controller = controller
-        self.setWindowTitle("台式万用表自动校准软件 V0.1.0")
+        self.setWindowTitle("台式万用表自动校准软件 V0.2.0")
         self.resize(640, 280)
 
         self._workstation_value = QLabel()
@@ -43,12 +50,20 @@ class MainWindow(QMainWindow):
         settings_button.clicked.connect(self._open_settings)
         check_button = QPushButton("重新检查服务器")
         check_button.clicked.connect(self.controller.check_server)
+        self._log_button = QPushButton("日志查看")
+        self._log_button.setObjectName("openLogViewerButton")
+        self._log_button.setVisible(
+            self.controller.log_service is not None
+            and self.controller.config.environment is not Environment.PRODUCTION
+        )
+        self._log_button.clicked.connect(self._open_log_viewer)
         close_button = QPushButton("退出")
         close_button.clicked.connect(self.close)
 
         button_layout = QHBoxLayout()
         button_layout.addWidget(settings_button)
         button_layout.addWidget(check_button)
+        button_layout.addWidget(self._log_button)
         button_layout.addStretch(1)
         button_layout.addWidget(close_button)
 
@@ -78,6 +93,10 @@ class MainWindow(QMainWindow):
     def _apply_config(self, config: WorkstationConfig) -> None:
         self._workstation_value.setText(config.workstation_id)
         self._environment_value.setText(config.environment.value)
+        self._log_button.setVisible(
+            self.controller.log_service is not None
+            and config.environment is not Environment.PRODUCTION
+        )
 
     @Slot()
     def _show_checking(self) -> None:
@@ -101,3 +120,13 @@ class MainWindow(QMainWindow):
             self.controller.save_config(dialog.result_config)
         except (ConfigValidationError, ConfigWriteError) as exc:
             QMessageBox.critical(self, "保存失败", str(exc))
+
+    @Slot()
+    def _open_log_viewer(self) -> None:
+        if self.controller.log_service is None:
+            return
+        dialog = LogViewerDialog(
+            LogQueryService(self.controller.log_service),
+            self,
+        )
+        dialog.exec()

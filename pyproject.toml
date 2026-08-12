@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dmm-calibration"
-version = "0.1.0"
+version = "0.2.0"
 description = "台式万用表自动校准软件 Windows 客户端"
 readme = "README.md"
 requires-python = "==3.13.14"

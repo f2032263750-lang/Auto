@@ -49,12 +49,18 @@ class ArchitectureBoundaryTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_m1_device_and_communication_layers_are_placeholders(self) -> None:
-        for layer in ("devices", "communication", "calculation", "reports", "logging"):
+    def test_unimplemented_layers_are_placeholders(self) -> None:
+        for layer in ("devices", "communication", "calculation", "reports"):
             files = sorted(
                 path.name for path in (SOURCE_ROOT / layer).glob("*.py")
             )
             self.assertEqual(files, ["__init__.py"], layer)
+
+    def test_logging_layer_contains_only_m2_components(self) -> None:
+        files = sorted(
+            path.name for path in (SOURCE_ROOT / "logging").glob("*.py")
+        )
+        self.assertEqual(files, ["__init__.py", "events.py", "query.py", "service.py"])
 
 
 if __name__ == "__main__":

@@ -9,6 +9,11 @@ from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from dmm_calibration.config import ConfigFileError, ConfigRepository, ConfigWriteError
+from dmm_calibration.logging import (
+    LogChannel,
+    StructuredLogService,
+    minimum_level_for_environment,
+)
 from dmm_calibration.ui.main_window import MainWindow
 from dmm_calibration.workflow import ApplicationController
 
@@ -64,6 +69,7 @@ def run(config_directory: Path | None = None) -> int:
     repository = ConfigRepository(
         selected_config_directory / "workstation.json", base_directory
     )
+    recovered_backup_path: Path | None = None
 
     try:
         load_result = repository.load_or_create()
@@ -80,11 +86,15 @@ def run(config_directory: Path | None = None) -> int:
             QMessageBox.information(None, "启动已取消", "配置未被修改，客户端将退出。")
             return 2
         try:
-            config, backup_path = repository.recover_default()
+            config, recovered_backup_path = repository.recover_default()
         except ConfigWriteError as write_error:
             QMessageBox.critical(None, "配置恢复失败", str(write_error))
             return 3
-        backup_message = f"\n损坏文件备份：{backup_path}" if backup_path else ""
+        backup_message = (
+            f"\n损坏文件备份：{recovered_backup_path}"
+            if recovered_backup_path
+            else ""
+        )
         QMessageBox.information(
             None, "配置已恢复", f"已恢复默认配置。{backup_message}"
         )
@@ -92,11 +102,64 @@ def run(config_directory: Path | None = None) -> int:
         QMessageBox.critical(None, "客户端启动失败", str(exc))
         return 3
 
-    controller = ApplicationController(repository, config)
-    window = MainWindow(controller)
-    window.show()
-    controller.check_server()
-    return app.exec()
+    log_service = StructuredLogService(
+        Path(config.log_directory),
+        minimum_level=minimum_level_for_environment(config.environment),
+    )
+    log_service.business(
+        "APP_STARTED",
+        "客户端启动",
+        module="bootstrap",
+        workstation_id=config.workstation_id,
+        success=True,
+        details={"environment": config.environment.value},
+    )
+    if recovered_backup_path is not None:
+        log_service.audit(
+            "CONFIG_RECOVERED",
+            "损坏的工位配置已备份并恢复默认值",
+            module="config",
+            workstation_id=config.workstation_id,
+            success=True,
+            details={"backup_path": recovered_backup_path},
+        )
+    previous_excepthook = sys.excepthook
+    controller: ApplicationController | None = None
+
+    def log_unhandled_exception(exc_type, exc_value, exc_traceback) -> None:
+        workstation_id = (
+            controller.config.workstation_id
+            if controller is not None
+            else config.workstation_id
+        )
+        log_service.exception(
+            LogChannel.BUSINESS,
+            "UNHANDLED_EXCEPTION",
+            "客户端未捕获异常",
+            exc_value,
+            module="bootstrap",
+            workstation_id=workstation_id,
+            success=False,
+        )
+        previous_excepthook(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = log_unhandled_exception
+    try:
+        controller = ApplicationController(repository, config, log_service=log_service)
+        window = MainWindow(controller)
+        window.show()
+        controller.check_server()
+        exit_code = app.exec()
+        log_service.business(
+            "APP_STOPPED",
+            "客户端退出",
+            module="bootstrap",
+            workstation_id=controller.config.workstation_id,
+            success=True,
+        )
+        return exit_code
+    finally:
+        sys.excepthook = previous_excepthook
 
 
 def main(argv: list[str] | None = None) -> int:
